@@ -1,0 +1,155 @@
+---
+title: "ST442 Project"
+author: "Ryan Mersereau"
+date: "2023-12-07"
+output: html_document
+---
+```{r}
+library(readr)
+library(tidyverse)
+bball <- read_csv("~/Downloads/bball.csv")
+```
+
+```{r}
+# Finding variables that best predict winning for the home team
+# Create new variable for point differential and win/loss/tie
+library(dplyr)
+bball <- bball |>
+  mutate(point_differential = h_points_game - a_points_game,
+         h_game_result = case_when(
+           point_differential > 0 ~ "Win",
+           point_differential < 0 ~ "Loss",
+           TRUE ~ "Tie"
+         ))
+  
+```
+
+```{r}
+# EDA
+library(ggplot2)
+
+# Create a bar graph for distribution of results
+ggplot(bball, aes(x = h_game_result)) +
+  geom_bar(fill = c("red", "blue", "green")) +  
+  geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.5) +
+  labs(title = "Distribution of Home Game Results", x = "Game Result", y = "Frequency")
+```
+
+
+```{r}
+bball |>
+  dplyr::select(h_alias, h_points_game, a_alias, a_points_game, point_differential, h_game_result)
+
+bball |>
+  dplyr::select(h_points_game, h_points)
+```
+
+```{r}
+#Histogram of points scored
+library(ggplot2)
+
+ggplot(bball, aes(x = h_points_game)) + geom_histogram()
+
+```
+
+
+```{r}
+# Scatter plot of home vs away final score and home result
+
+ggplot(bball, aes(x = h_points_game, y = a_points_game, color = h_game_result)) +
+  geom_point() +
+  scale_color_manual(values = c("Win" = "green", "Loss" = "red", "Tie" = "blue")) +
+  labs(title = "Scatterplot of Points scored and game result",
+       x = "Home Points scored",
+       y = "Away Points scored")
+```
+
+
+```{r}
+# Predict with logistic regression model
+# Include relevant variables
+bball_vars <- bball[, c(43:78, 134)] # Including home team stats only
+head(bball_vars)
+
+bball_vars <- bball_vars |>
+  dplyr::select(-h_points)
+
+bball_vars <- na.omit(bball_vars)
+```
+
+```{r}
+regmodel <- glm(as.factor(h_game_result) ~ h_rank + h_field_goals_made, data = bball_vars, family = binomial)
+summary(regmodel)
+
+regmodel_full <- glm(as.factor(h_game_result) ~., data = bball_vars, family = binomial)
+#summary(regmodel_full)
+```
+
+```{r}
+levels(as.factor(bball$h_game_result))
+```
+
+```{r, include = FALSE}
+# Use Step AIC to built best fit for win prediction
+# Build logistic regression model
+library(MASS)
+
+fit0 = glm(as.factor(h_game_result) ~ h_field_goals_made, data = bball_vars, family = binomial)
+summary(fit0)
+
+# finding the best fit using stepAIC
+foo = stepAIC(fit0, scope = list(lower=fit0, upper = regmodel_full), direction = "forward")
+
+fit.best = glm(formula(foo), data = bball_vars, family = binomial)
+summary(fit.best)
+```
+
+```{r}
+# Final model using only 14 most significant variables
+final_formula <- as.factor(h_game_result) ~ h_field_goals_made + h_defensive_rebounds + h_points_off_turnovers + h_turnovers + h_offensive_rebounds + h_team_rebounds + h_steals + h_three_points_made + h_personal_fouls + h_free_throws_made + h_field_goals_att + h_free_throws_att + h_rank + h_coach_tech_fouls
+
+final_model <- glm(final_formula, data = bball_vars, family = binomial)
+summary(final_model)
+```
+
+```{r}
+# Classification tree
+library(tree) 
+
+wintree <- tree(final_formula, data = bball_vars)
+summary(wintree)
+```
+
+
+```{r}
+plot(wintree)
+text(wintree, pretty = 1, cex = 0.7)
+```
+```{r}
+# Perform cross-validation
+cv_result <- cv.tree(wintree)
+
+# Prune the tree based on cross-validation results
+pruned_tree <- prune.tree(wintree, best = cv_result$size[which.min(cv_result$dev)])
+
+# Plot the pruned tree
+plot(pruned_tree)
+text(pruned_tree, pretty = 0, cex = 0.8)
+```
+
+Pruning with cross validation resulted in no change to the tree.
+
+```{r}
+# Making fancy classification tree with rpart
+library(rattle)
+library(rpart.plot)
+
+rparttree <- rpart(final_formula, data = bball_vars, method = "class")
+
+fancyRpartPlot(rparttree, caption = "Classification Tree for Home NCAA Wins")
+```
+
+```{r}
+#summary(rparttree)
+```
+
